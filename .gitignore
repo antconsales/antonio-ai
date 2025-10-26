@@ -42,3 +42,14 @@ Thumbs.db
 .env
 *.pem
 *.key
+
+# Claude Code
+.claude/
+
+# FFmpeg binaries (too large for git)
+ffmpeg-8.0-essentials_build/
+ffmpeg*.zip
+ffmpeg*.7z
+
+# Temp files
+nul
