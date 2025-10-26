@@ -58,8 +58,8 @@ cd antonio-ai
 pip install -r requirements.txt
 
 # Pull models
-ollama pull chill123/antonio-gemma3-evo-q4         # SOCIAL (720MB)
-ollama pull chill123/antonio-gemma3-evo-q4-logic   # LOGIC (806MB)
+ollama pull chill123/antonio-gemma3-evo-q4                  # SOCIAL (720MB)
+ollama pull antconsales/antonio-gemma3-evo-q4-logic         # LOGIC (806MB)
 
 # Start server
 python -m api.server
@@ -69,10 +69,10 @@ python -m api.server
 
 ## 📚 Models
 
-| Model | Type | Size | HuggingFace | Use Case |
-|-------|------|------|-------------|----------|
-| **SOCIAL** | Conversation | 720 MB | [chill123/antonio-gemma3-evo-q4](https://huggingface.co/chill123/antonio-gemma3-evo-q4) | Chat, storytelling |
-| **LOGIC** | Reasoning | 806 MB | [chill123/antonio-gemma3-evo-q4-logic](https://huggingface.co/chill123/antonio-gemma3-evo-q4-logic) | Math, coding, logic |
+| Model | Type | Size | HuggingFace | Ollama | Use Case |
+|-------|------|------|-------------|--------|----------|
+| **SOCIAL** | Conversation | 720 MB | [chill123/antonio-gemma3-evo-q4](https://huggingface.co/chill123/antonio-gemma3-evo-q4) | `ollama pull chill123/antonio-gemma3-evo-q4` | Chat, storytelling |
+| **LOGIC** | Reasoning | 806 MB | [chill123/antonio-gemma3-evo-q4-logic](https://huggingface.co/chill123/antonio-gemma3-evo-q4-logic) | [antconsales/antonio-gemma3-evo-q4-logic](https://ollama.com/antconsales/antonio-gemma3-evo-q4-logic) | Math, coding, logic |
 
 ---
 
