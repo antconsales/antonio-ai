@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  antonio:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - ollama
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
+    command: >
+      sh -c "sleep 10 &&
+             ollama pull chill123/antonio-gemma3-evo-q4 &&
+             ollama pull chill123/antonio-gemma3-evo-q4-logic &&
+             uvicorn api.server:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  ollama_data:
