@@ -105,7 +105,7 @@ class EvoMemoryDB:
         """)
 
         self.conn.commit()
-        print(f"✓ EvoMemory™ database initialized at {self.db_path}")
+        print(f"EvoMemory database initialized at {self.db_path}")
 
     def close(self):
         """Chiude la connessione"""

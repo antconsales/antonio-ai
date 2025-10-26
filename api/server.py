@@ -9,9 +9,13 @@ from datetime import datetime
 from typing import Optional, List
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+import tempfile
+import os
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent))
@@ -88,13 +92,16 @@ class AppState:
         self.db: Optional[EvoMemoryDB] = None
         self.neuron_store: Optional[NeuronStore] = None
         self.rag: Optional[RAGLite] = None
-        
+
         # DUAL MODEL SYSTEM
         self.llama_social: Optional[LlamaInference] = None  # For SIMPLE/MEDIUM
         self.llama_logic: Optional[LlamaInference] = None   # For COMPLEX/CODE/CREATIVE
-        
+
         self.scorer: ConfidenceScorer = ConfidenceScorer()
         self.start_time = datetime.now()
+
+        # Whisper for offline voice recognition
+        self.whisper_model = None
 
         # System prompt
         self.system_prompt = """You are Antonio, an ITALIAN AI assistant.
@@ -168,7 +175,7 @@ metrics = MetricsCollector()
 @app.on_event("startup")
 async def startup():
     """Inizializza componenti"""
-    print("🚀 Starting Antonio Gemma3 Evo Q4 - Dual Model System...")
+    print("Starting Antonio Gemma3 Evo Q4 - Dual Model System...")
 
     # Database
     db_path = Path(__file__).parent.parent / "data/evomemory/neurons.db"
@@ -183,27 +190,38 @@ async def startup():
     # SOCIAL Model: for simple/conversational questions
     try:
         state.llama_social = LlamaInference(
-            model_path="chill123/antonio-gemma3-evo-q4"
+            model_path="antconsales/antonio-gemma3-evo-q4"
         )
-        print("✓ Loaded SOCIAL model: gemma2:2b (720 MB)")
+        print("Loaded SOCIAL model: antconsales/antonio-gemma3-evo-q4 (720 MB)")
     except Exception as e:
-        print(f"⚠️  Warning: Could not load SOCIAL model: {e}")
+        print(f"Warning: Could not load SOCIAL model: {e}")
+        print("   Using LOGIC model as fallback for all queries")
 
     # LOGIC Model: for complex/code/logic questions
     try:
         state.llama_logic = LlamaInference(
-            model_path="antconsales/antonio-gemma3-evo-q4:custom"
+            model_path="antconsales/antonio-gemma3-evo-q4-logic"
         )
-        print("✓ Loaded LOGIC model: gemma2:2b (806 MB)")
+        print("Loaded LOGIC model: antconsales/antonio-gemma3-evo-q4-logic (806 MB)")
     except Exception as e:
-        print(f"⚠️  Warning: Could not load LOGIC model: {e}")
+        print(f"Warning: Could not load LOGIC model: {e}")
 
     if not state.llama_social and not state.llama_logic:
-        print("⚠️  No models loaded - Running in API-only mode")
+        print("No models loaded - Running in API-only mode")
+
+    # Whisper Model: for offline voice recognition
+    try:
+        import whisper
+        print("Loading Whisper model (base)...")
+        state.whisper_model = whisper.load_model("base")
+        print("Whisper model loaded successfully! Voice recognition is OFFLINE.")
+    except Exception as e:
+        print(f"Warning: Could not load Whisper model: {e}")
+        print("   Voice recognition will not be available")
 
     stats = state.db.get_stats()
-    print(f"✓ EvoMemory loaded: {stats['neurons']} neurons, {stats['rules']} rules")
-    print(f"✓ Server ready at http://localhost:8000")
+    print(f"EvoMemory loaded: {stats['neurons']} neurons, {stats['rules']} rules")
+    print(f"Server ready at http://localhost:8000")
 
 
 @app.on_event("shutdown")
@@ -211,8 +229,25 @@ async def shutdown():
     """Cleanup"""
     if state.db:
         state.db.close()
-    print("👋 Shutdown complete")
+    print("Shutdown complete")
 
+
+# ============================================================================
+# STATIC FILES & WEB UI
+# ============================================================================
+
+# Mount static files
+static_path = Path(__file__).parent.parent / "static"
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+
+@app.get("/ui")
+async def serve_ui():
+    """Serve web UI"""
+    ui_path = Path(__file__).parent.parent / "static" / "index.html"
+    if ui_path.exists():
+        return FileResponse(ui_path)
+    return {"error": "UI not found"}
 
 # ============================================================================
 # ENDPOINTS
@@ -258,6 +293,62 @@ async def get_metrics():
 
 
 
+@app.post("/transcribe")
+async def transcribe_audio(file: UploadFile = File(...)):
+    """Transcribe audio using Whisper (OFFLINE) - No internet required!"""
+    if not state.whisper_model:
+        raise HTTPException(status_code=503, detail="Whisper model not loaded")
+
+    temp_path = None
+    try:
+        # Save uploaded file temporarily
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".webm") as temp_audio:
+            content = await file.read()
+            temp_audio.write(content)
+            temp_path = temp_audio.name
+
+        print(f"Audio file saved: {temp_path} (size: {len(content)} bytes)")
+        print(f"File content type: {file.content_type}")
+
+        # Check if file exists
+        if not os.path.exists(temp_path):
+            raise Exception(f"Temp file not found: {temp_path}")
+
+        print(f"Transcribing with Whisper...")
+
+        # Transcribe with Whisper (OFFLINE!)
+        # Whisper can handle many audio formats including webm
+        # Auto-detect language (supports 90+ languages: IT, EN, ES, FR, DE, etc.)
+        result = state.whisper_model.transcribe(
+            temp_path,
+            fp16=False,  # For CPU compatibility
+            verbose=True
+        )
+
+        transcribed_text = result["text"].strip()
+        print(f"Whisper transcribed: '{transcribed_text}'")
+
+        return {
+            "status": "ok",
+            "text": transcribed_text,
+            "language": result.get("language", "it")
+        }
+
+    except Exception as e:
+        import traceback
+        print(f"ERROR in transcribe:")
+        traceback.print_exc()
+        return {"status": "error", "error": str(e)}
+    finally:
+        # Cleanup
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+                print(f"Cleaned up temp file: {temp_path}")
+            except:
+                pass
+
+
 @app.post("/listen")
 async def listen_audio():
     """Speech-to-text usando microfono HyperX SoloCast"""
@@ -271,25 +362,25 @@ async def listen_audio():
         # Try to find it automatically, fallback to default
         try:
             with sr.Microphone(device_index=2) as source:
-                print("🎤 Listening... (speak now)")
+                print("Listening... (speak now)")
                 # Adjust for ambient noise
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
                 # Listen for audio (5 second timeout)
                 audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
-                print("✓ Audio captured, processing...")
+                print("Audio captured, processing...")
         except:
             # Fallback to default microphone
             with sr.Microphone() as source:
-                print("🎤 Listening on default mic...")
+                print("Listening on default mic...")
                 recognizer.adjust_for_ambient_noise(source, duration=0.5)
                 audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
-                print("✓ Audio captured, processing...")
-        
+                print("Audio captured, processing...")
+
         # Try to recognize speech using Google Speech Recognition
         try:
             # Italian language
             text = recognizer.recognize_google(audio, language="it-IT")
-            print(f"✓ Recognized: {text}")
+            print(f"Recognized: {text}")
             return {"status": "ok", "text": text, "language": "it"}
         except sr.UnknownValueError:
             return {"status": "error", "error": "Could not understand audio"}
@@ -384,8 +475,8 @@ async def chat(request: ChatRequest):
     if complexity in [Complexity.SIMPLE, Complexity.MEDIUM]:
         # Use SOCIAL model
         selected_model = state.llama_social
-        model_name = "SOCIAL (chill123/antonio-gemma3-evo-q4)"
-        
+        model_name = "SOCIAL (antconsales/antonio-gemma3-evo-q4)"
+
         # Fallback to LOGIC if SOCIAL not available
         if not selected_model and state.llama_logic:
             selected_model = state.llama_logic
@@ -393,8 +484,8 @@ async def chat(request: ChatRequest):
     else:
         # Use LOGIC model for COMPLEX, CODE, CREATIVE
         selected_model = state.llama_logic
-        model_name = "LOGIC (antconsales/antonio-gemma3-evo-q4:custom)"
-        
+        model_name = "LOGIC (antconsales/antonio-gemma3-evo-q4-logic)"
+
         # Fallback to SOCIAL if LOGIC not available
         if not selected_model and state.llama_social:
             selected_model = state.llama_social
@@ -403,11 +494,11 @@ async def chat(request: ChatRequest):
     if not selected_model:
         raise HTTPException(status_code=503, detail="No suitable model available")
 
-    print(f"🤖 Using {model_name} for complexity={complexity.name} question")
+    print(f"Using {model_name} for complexity={complexity.name} question")
 
     # Generate - with optional Power Sampling
     if request.use_power_sampling:
-        print(f"🔬 Using Power Sampling (α=4.0, MCMC=10) for enhanced reasoning")
+        print(f"Using Power Sampling (alpha=4.0, MCMC=10) for enhanced reasoning")
 
         # Initialize Power Sampler
         power_sampler = PowerSampler(
